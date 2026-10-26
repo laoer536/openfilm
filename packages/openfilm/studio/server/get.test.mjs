@@ -273,7 +273,7 @@ test('asr: a recording outside assets/ gets its transcript beside it too; the to
   assert.equal(calls.filter((c) => c.path === '/v1/speech-to-text').length, 2);
 });
 
-test('asr: a service that times no words still gets a transcript, its lines spread over the speech', async () => {
+test('asr: a MiMo transcript lands beside the recording, its words carrying the time each stretch was said', async () => {
   const root = project();
   mkdirSync(join(root, 'assets'), { recursive: true });
   execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', join(root, 'assets/talk.wav')]);
@@ -286,9 +286,9 @@ test('asr: a service that times no words still gets a transcript, its lines spre
   assert.equal(sent.headers['api-key'], 'mimo-test-0123456789');
   assert.equal(body.model, 'mimo-v2.5-asr');
   assert.match(body.messages[0].content[0].input_audio.data, /^data:audio\/mpeg;base64,/);
-  /* one line a sentence, the whole of it up within the four seconds the service counted */
+  /* one line a sentence; each word a timestamp tag inside it, the first of a line the cue's own start */
   const vtt = readFileSync(join(root, 'assets/talk.vtt'), 'utf8');
-  assert.match(vtt, /^WEBVTT\n\n00:00:00\.000 --> 00:00:0[0-3]\.\d{3}\n你好，世界。\n\n00:00:0[0-3]\.\d{3} --> 00:00:0[0-4]\.\d{3}\nHello there\.\n$/);
+  assert.match(vtt, /^WEBVTT\n\n00:00:00\.000 --> 00:00:00\.\d{3}\n你<00:00:00\.\d{3}>好，<00:00:00\.\d{3}>世<00:00:00\.\d{3}>界。\n\n00:00:00\.\d{3} --> 00:00:01\.\d{3}\nHello <00:00:00\.\d{3}>there\.\n$/);
   assert.equal(JSON.parse(await runGet(root, 'asr', { src: 'assets/talk.wav' })).skip, true, 'not made twice');
 });
 
