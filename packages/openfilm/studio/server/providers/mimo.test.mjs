@@ -2,6 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import mimo from './mimo.mjs';
+import { wav } from './common.mjs';
 
 const KEY = 'sk-test_0123456789abcdef';
 /** a fake Xiaomi MiMo on 127.0.0.1: `reply` answers each request; `seen` keeps them. */
@@ -75,6 +76,42 @@ test('a key it does not accept, an emptied account and an untranscribable answer
   assert.equal(silent.index[0].dur, undefined);
 });
 
+test('voices: the nine the API names, a limit honored; filters are said not to narrow them', async () => {
+  const all = await mimo.run('voice', { limit: 100 }, ctx());
+  assert.deepEqual(all.receipt.voices.map((v) => v.voiceId), ['mimo_default', '冰糖', '茉莉', '苏打', '白桦', 'Mia', 'Chloe', 'Milo', 'Dean']);
+  assert.equal(all.receipt.voices[0].name, 'Default');
+  assert.equal(all.receipt.voices[2].name, '茉莉');
+  assert.equal(all.receipt.notes, undefined, 'asked for nothing: nothing said');
+  const few = await mimo.run('voice', { limit: 2, language: 'en', gender: 'f', prompt: 'whispery' }, ctx());
+  assert.deepEqual(few.receipt.voices.map((v) => v.voiceId), ['mimo_default', '冰糖']);
+  assert.equal(few.receipt.notes.length, 3);
+});
+
+test('voice-over: MiMo-V2.5-TTS as a WAV in the answer, the line as the assistant\'s message', async () => {
+  reply = () => [200, { choices: [{ message: { content: '', audio: { data: Buffer.from(wav(new Uint8Array(48000), 24000)).toString('base64') } } }] }];
+  const result = await mimo.run('tts', { out: 'line', text: 'Hello there.', voice: 'Chloe' }, ctx());
+  const body = sent(seen.at(-1));
+  assert.equal(seen.at(-1).url.pathname, '/v1/chat/completions');
+  assert.equal(seen.at(-1).headers['api-key'], KEY);
+  assert.equal(body.model, 'mimo-v2.5-tts');
+  assert.deepEqual(body.messages, [{ role: 'assistant', content: 'Hello there.' }]);
+  assert.deepEqual(body.audio, { format: 'wav', voice: 'Chloe' });
+  assert.equal(result.files[0].path, 'assets/audio/vo/line.wav');
+  assert.equal(result.files[0].bytes.length, 48044, 'the WAV as it came, header and all');
+  assert.deepEqual(result.index, [{ src: 'assets/audio/vo/line.wav', kind: 'audio', dur: 1, text: 'Hello there.', voice: 'Chloe',
+    from: { mode: 'synth', text: 'Hello there.', provider: 'mimo', model: 'mimo-v2.5-tts' } }]);
+  assert.equal(result.receipt.voice, 'Chloe');
+  assert.match(result.receipt.notes[0], /no word timings/);
+});
+
+test('a voice it does not know is said so in the answer; an answer with no audio is refused', async () => {
+  const files = {};
+  reply = () => [400, { error: { code: '400', message: 'Param Incorrect', param: 'Unknown voice: NoSuchVoice. Available voices: [mimo_default, Chloe]' } }];
+  await assert.rejects(mimo.run('tts', { out: 'x', text: 'hi', voice: 'NoSuchVoice' }, ctx(files)), /Xiaomi MiMo answered 400: Param Incorrect/);
+  reply = () => [200, { choices: [{ message: { content: '' } }] }];
+  await assert.rejects(mimo.run('tts', { out: 'x', text: 'hi', voice: 'Chloe' }, ctx(files)), /answered with no audio/);
+});
+
 test('another verb is refused', async () => {
-  await assert.rejects(mimo.run('tts', { out: 'x', text: 'hi', voice: 'v' }, ctx()), /Xiaomi MiMo does not do tts/);
+  await assert.rejects(mimo.run('sfx', { out: 'x', prompt: 'boom' }, ctx()), /Xiaomi MiMo does not do sfx/);
 });
