@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import mimo from './mimo.mjs';
+import mimo, { baseFor } from './mimo.mjs';
 import { wav } from './common.mjs';
 
 const KEY = 'sk-test_0123456789abcdef';
@@ -103,12 +103,17 @@ test('speech over 100 MB is refused before anything is sent', async () => {
   assert.equal(seen.length, before);
 });
 
-test('a Token Plan key at the pay-as-you-go address is told where it belongs; a used-up plan is a balance', async () => {
+test('the key says where it answers: a Token Plan key at its gateway, a platform key at the pay-as-you-go API', () => {
+  assert.equal(baseFor('tp-test_0123456789abcdef'), 'https://token-plan-cn.xiaomimimo.com');
+  assert.equal(baseFor('sk-test_0123456789abcdef'), 'https://api.xiaomimimo.com');
+});
+
+test('a Token Plan key pointed elsewhere is told where it belongs; a used-up plan is a balance', async () => {
   const mp3 = new Uint8Array(Buffer.concat([Buffer.from('ID3'), Buffer.alloc(10)]));
   const files = { 'assets/talk.mp3': mp3 };
   reply = () => [401, { error: { message: 'Invalid API Key' } }];
   await assert.rejects(mimo.run('asr', { src: 'assets/talk.mp3' }, ctx(files, undefined, 'tp-test_0123456789abcdef')),
-    /Token Plan key.*OPENFILM_MIMO_URL=https:\/\/token-plan-cn\.xiaomimimo\.com/);
+    /Token Plan key answers at https:\/\/token-plan-cn\.xiaomimimo\.com; check OPENFILM_MIMO_URL/);
   reply = () => [429, { error: { message: 'quota exhausted' } }];
   await assert.rejects(mimo.run('asr', { src: 'assets/talk.mp3' }, ctx(files)), (e) => e.code === 'balance');
   reply = () => [401, { error: { message: 'Invalid API Key' } }];

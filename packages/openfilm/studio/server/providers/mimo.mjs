@@ -2,8 +2,9 @@
 /**
  * Xiaomi MiMo with the person's own key: speech recognition (MiMo-V2.5-ASR) and voice-over (MiMo-V2.5-TTS) through
  * the MiMo API (https://platform.xiaomimimo.com/docs). Both are chat completions under /v1/chat/completions with the
- * key in an `api-key` header; a Token Plan subscriber reaches the same API and key through its gateway
- * (https://token-plan-cn.xiaomimimo.com): OPENFILM_MIMO_URL points there.
+ * key in an `api-key` header. A platform key (sk-…) answers at the pay-as-you-go API; a Token Plan key (tp-…) at its
+ * gateway (https://token-plan-cn.xiaomimimo.com) — the key says which, so neither is set by hand.
+ * OPENFILM_MIMO_URL points both somewhere else (a test server, a proxy).
  *
  * Recognition answers text with no word timings. To keep subtitles honest, the speech is cut at its pauses first
  * (ffmpeg, as `get` already needs it) and each stretch is asked for on its own, so every stretch's words carry the
@@ -38,12 +39,16 @@ const MIN_STRETCH = 0.7;
 /** the longest stretch asked for at once */
 const MAX_STRETCH = 30;
 
+/** Where a key answers: a Token Plan key (tp-…) at its gateway, a platform key (sk-…) at the pay-as-you-go API. */
+export const baseFor = (/** @type {string} */ key) =>
+  key.startsWith('tp-') ? 'https://token-plan-cn.xiaomimimo.com' : 'https://api.xiaomimimo.com';
+
 /** What MiMo says when a key cannot work where it was sent, or the plan has nothing left. */
 function guided(/** @type {unknown} */ e, /** @type {string} */ key) {
   const said = String(/** @type {Error} */ (e)?.message ?? e);
-  /* a Token Plan key at the pay-as-you-go address answers 401: it reads as a wrong key without saying which it is */
+  /* a Token Plan key answered 401: it went where it was told (an OPENFILM_MIMO_URL), not where it belongs */
   if (/\(401\)/.test(said) && key.startsWith('tp-')) {
-    return new Error(`${said} A Token Plan key is not a platform key: it only answers at its gateway — set OPENFILM_MIMO_URL=https://token-plan-cn.xiaomimimo.com.`);
+    return new Error(`${said} A Token Plan key answers at https://token-plan-cn.xiaomimimo.com; check OPENFILM_MIMO_URL is not pointing it elsewhere.`);
   }
   /* the plan's quota used up answers 429 */
   if (/answered 429/.test(said)) return noBalance(NAME);
@@ -130,7 +135,7 @@ export default {
   models: MODELS,
   speechFormat: 'mp3',
   async run(verb, args, ctx) {
-    const base = serviceUrl('MIMO', 'https://api.xiaomimimo.com');
+    const base = serviceUrl('MIMO', baseFor(ctx.key));
     const send = (/** @type {Record<string, unknown>} */ payload) =>
       call(NAME, `${base}/v1/chat/completions`, {
         method: 'POST', signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(TIMEOUT_MS)]),
